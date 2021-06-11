@@ -390,22 +390,27 @@ class DataAugmentation:
 
     def saveLayer(self, dst, arr):
 
-        # check dst name extension
-        dst = dst if os.path.splitext(dst)[1] != "" else (dst+".tif")
+        try:
 
-        [rows, cols] = arr.shape
+            # check dst name extension
+            dst = dst if os.path.splitext(dst)[1] != "" else (dst+".tif")
 
-        driver = gdal.GetDriverByName("GTiff")
-        outdata = driver.Create(dst, cols, rows, 1, gdal.GDT_UInt16)
+            [rows, cols] = arr.shape
 
-        outdata.SetGeoTransform(self.geoTransform)
-        outdata.SetProjection(self.projection) 
-        outdata.GetRasterBand(1).WriteArray(arr)
-        outdata.GetRasterBand(1).SetNoDataValue(10000)
+            driver = gdal.GetDriverByName("GTiff")
+            outdata = driver.Create(dst, cols, rows, 1, gdal.GDT_UInt16)
 
-        outdata.FlushCache()
+            outdata.SetGeoTransform(self.geoTransform)
+            outdata.SetProjection(self.projection) 
+            outdata.GetRasterBand(1).WriteArray(arr)
+            outdata.GetRasterBand(1).SetNoDataValue(10000)
 
-        outdata = None
+            outdata.FlushCache()
+
+            outdata = None
+        except Exception as err:
+            print(err)
+            return -1
 
         return dst
     
@@ -478,7 +483,9 @@ class DataAugmentation:
 
         # if last child level
         if(len(_item.takeChildren()) == 0):
+
             dst = self.saveLayer(os.path.join(self.roundPath, itemName), self.methodItem[itemName])
+            if(dst == -1): return -1
             layer = QgsRasterLayer(dst, itemName)
             self.plotCanvas(layer)
 
@@ -507,7 +514,7 @@ class DataAugmentation:
                     self.methods["rotate"]["rotate90"][_outName]["image"] = _img
                     self.methods["rotate"]["rotate90"][_outName]["name"]  = _outName
                     self.methods["rotate"]["rotate90"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Rotate180
@@ -530,7 +537,7 @@ class DataAugmentation:
                     self.methods["rotate"]["rotate180"][_outName]["image"] = _img
                     self.methods["rotate"]["rotate180"][_outName]["name"]  = _outName
                     self.methods["rotate"]["rotate180"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
             
             # Flip Hor
@@ -553,7 +560,7 @@ class DataAugmentation:
                     self.methods["flip"]["horizontal"][_outName]["image"] = _img
                     self.methods["flip"]["horizontal"][_outName]["name"]  = _outName
                     self.methods["flip"]["horizontal"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Flip Ver
@@ -575,7 +582,7 @@ class DataAugmentation:
                     self.methods["flip"]["vertical"][_outName]["image"] = _img
                     self.methods["flip"]["vertical"][_outName]["name"]  = _outName
                     self.methods["flip"]["vertical"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Rescale
@@ -592,12 +599,12 @@ class DataAugmentation:
                     _out = root + "_RESCALE.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
                     _img = rescale(dataset["bandArr"], 0.5)
-                    
+
                     self.methods["reshape"]["rescale"][_outName] = dict()
                     self.methods["reshape"]["rescale"][_outName]["image"] = _img
                     self.methods["reshape"]["rescale"][_outName]["name"]  = _outName
                     self.methods["reshape"]["rescale"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Crop
@@ -619,7 +626,7 @@ class DataAugmentation:
                     self.methods["reshape"]["crop"][_outName]["image"] = _img
                     self.methods["reshape"]["crop"][_outName]["name"]  = _outName
                     self.methods["reshape"]["crop"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Truncate
@@ -641,7 +648,7 @@ class DataAugmentation:
                     self.methods["reshape"]["truncate"][_outName]["image"] = _img
                     self.methods["reshape"]["truncate"][_outName]["name"]  = _outName
                     self.methods["reshape"]["truncate"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Trim
@@ -657,12 +664,12 @@ class DataAugmentation:
 
                     _out = root + "_TRIM.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = trim(dataset["bandArr"], 200, 200, 20, 20)
+                    _img = trim(dataset["bandArr"], 50, 50, 20, 20)
                     self.methods["reshape"]["trim"][_outName] = dict()
                     self.methods["reshape"]["trim"][_outName]["image"] = _img
                     self.methods["reshape"]["trim"][_outName]["name"]  = _outName
                     self.methods["reshape"]["trim"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Binary
@@ -684,7 +691,7 @@ class DataAugmentation:
                     self.methods["color"]["binary"][_outName]["image"] = _img
                     self.methods["color"]["binary"][_outName]["name"]  = _outName
                     self.methods["color"]["binary"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Cloud
@@ -706,7 +713,7 @@ class DataAugmentation:
                     self.methods["remote_sensing"]["cloud"][_outName]["image"] = _img
                     self.methods["remote_sensing"]["cloud"][_outName]["name"]  = _outName
                     self.methods["remote_sensing"]["cloud"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Degradation
@@ -728,7 +735,7 @@ class DataAugmentation:
                     self.methods["remote_sensing"]["degradation"][_outName]["image"] = _img
                     self.methods["remote_sensing"]["degradation"][_outName]["name"]  = _outName
                     self.methods["remote_sensing"]["degradation"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Haze
@@ -750,7 +757,7 @@ class DataAugmentation:
                     self.methods["remote_sensing"]["haze"][_outName]["image"] = _img
                     self.methods["remote_sensing"]["haze"][_outName]["name"]  = _outName
                     self.methods["remote_sensing"]["haze"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
 
             # Edgy
@@ -772,7 +779,7 @@ class DataAugmentation:
                     self.methods["remote_sensing"]["sharpen_edges"][_outName]["image"] = _img
                     self.methods["remote_sensing"]["sharpen_edges"][_outName]["name"]  = _outName
                     self.methods["remote_sensing"]["sharpen_edges"][_outName]["path"]  = _out
-
+                    
                     self.methodItem[_outName] = _img
             
             # Augmentate
@@ -878,6 +885,25 @@ class DataAugmentation:
             self.roundPath = os.path.join(self.tmpFolder, str(self.round))
             os.mkdir(self.roundPath)
             self.round += 1
+        else:
+            # if exists, update round and create
+            try:
+
+                # max number round 
+                newRound = max([int(x) for x in os.listdir(self.tmpFolder)])
+                newRound += 1
+                self.round = newRound
+
+                # creating again
+                if not(os.path.isdir(os.path.join(self.tmpFolder, str(self.round)))):
+                    self.roundPath = os.path.join(self.tmpFolder, str(self.round))
+                    os.mkdir(self.roundPath)
+                    self.round += 1
+
+            except Exception  as err:
+                print(err)
+                self.iface.messageBar().pushMessage("Error", f"{err}", level=Qgis.Critical)
+                return -1
 
         # Clip by vector
         if(self.selectedNameVector and self.selectedName):
