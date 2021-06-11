@@ -1,5 +1,21 @@
 # -*- coding: utf-8 -*-
 """
+cmd = "gdalwarp -crop_to_cutline -cutline C:\\tmp_augmentation\\teste_1.shp C:\\Users\\Gabriel\\Desktop\\CBERS_4_PAN5M_20150712_154_126_L4_BAND1_crop.tif C:\\Users\\Gabriel\\Desktop\\teste000.tif"
+
+from osgeo import ogr
+from osgeo import osr
+
+# https://pcjericks.github.io/py-gdalogr-cookbook/projection.html
+
+driver = ogr.GetDriverByName('ESRI Shapefile')
+source = osr.SpatialReference()
+
+
+target = osr.SpatialReference()
+target.ImportFromEPSG(4326)
+
+v = ogr.Open("/content/teste.shp")
+
 /***************************************************************************
  DataAugmentation
                                  A QGIS plugin
@@ -31,190 +47,20 @@ from .resources import *
 from .DataAugmentation_dialog import DataAugmentationDialog
 import os.path
 
-
-# My imports
-import os
 from qgis import processing
-
 from qgis.gui import QgsMapToolPan
-from qgis.core import QgsProject, Qgis, QgsRasterLayer, QgsCoordinateReferenceSystem, QgsCoordinateTransform
+from qgis.core import QgsProject, Qgis, QgsRasterLayer
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QApplication, QWidget
 
-# Graphic view
-from PyQt5.QtCore import Qt
-from PIL import Image, ImageQt
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import QRectF
-from PyQt5.QtWidgets import QGraphicsScene, QHBoxLayout, QGraphicsView
-
-import sip
-import cv2
+import os
 import glob
 import shutil
+from sys import platform
+from . import check_dependences
+from .libs.methods import *
 
-from osgeo import gdal, osr, ogr
-
-import operator
-import numpy as np
-from random import randint
-from skimage.transform import resize
-from scipy.ndimage import gaussian_filter
-
-class Methods_Augmentate:
-
-    def __init__(self):
-        pass
-
-        # Rotação:
-    
-    def rotate(self, img, degrees):
-        return (np.rot90(img, k=int(degrees / 90)))
-
-    # Espelhamento:
-    def flip(self, img, direction):
-        if (direction == "vertical"):
-            return (img[::-1, ::])
-        elif (direction == "horizontal"):
-            return (img[::, ::-1])
-        elif (direction == "both"):
-            return (img[::-1, ::-1])
-
-    # Aparagem:
-    def trim(self, img, top=0, bottom=0, left=0, right=0):
-        return (img[top:-bottom, right:-left])
-
-    # Recorte:
-    def crop(self, img, right=0, top=0, left=100, bottom=100):
-        return (img[top:bottom, right:left])
-
-    # Gaussian blur:
-    def blur(self, img, sigma=1):
-        return(gaussian_filter(img, sigma=sigma))
-
-    # Redimensionamento:
-    def rescale(self, img, ratio):
-        return (resize(img, (int(img.shape[1] * ratio), int(img.shape[0] * ratio))))
-
-    # Binarização:
-    def binary(self, img, threshold=120, inv=False, bw=True):
-        if (inv == False):
-            method = cv2.THRESH_BINARY
-        else:
-            method = cv2.THRESH_BINARY_INV
-
-        if (bw == True):
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        return(cv2.threshold(img, threshold, 255, method)[1])
-
-    # Truncagem:
-    def trunc(self, img, threshold=120, max=255):
-        return (cv2.threshold(img, threshold, max, cv2.THRESH_TRUNC)[1])
-
-    # Extração e realce de bordas:
-    def edgy(self, img, threshold=120, max=255, aperture=3, mask=True):
-
-        if(img.dtype != "uint8"): img = img.astype('uint8')
-
-        edges = cv2.Canny(img, threshold, max, aperture)
-
-        if (mask == True):
-            return (cv2.bitwise_and(img, img, mask=cv2.bitwise_not(edges)))
-
-        return(edges)
-    
-    # Rotina de data augmentation:
-    def augmentate(self, img, name, chunks=100, invert=3, rotations=3, blur_sigmas=5):
-        
-        res = dict()
-        labelImg = dict()
-        areas = []
-
-        while (len(areas) != chunks):
-            x = randint(0, img.shape[1] - chunks)
-            y = randint(0, img.shape[0] - chunks)
-            if ((x, y) not in areas):
-                areas.append((x, y))
-
-        count = 1
-
-
-        for i, coords in enumerate(areas):
-            nimg = self.crop(img, coords[0], coords[1], coords[0] + chunks, coords[1] + chunks)
-            nm1 = (name+"_"+str(i)).upper()
-
-            for idx, x in enumerate([nimg, self.flip(nimg, "vertical"), self.flip(nimg, "horizontal"), self.flip(nimg, "both")][:invert + 1]):
-                nm1 += "_" + str(idx)
-                res[nm1] = dict()
-
-                for idx2, y in enumerate([0, 90, 180, 270][:rotations + 1]):
-                    nm2 = ("_ROTATE_" + str(y)).upper()
-                    _img = self.rotate(x, y)
-
-                    if(np.count_nonzero(_img) == 0): continue
-
-                    res[nm1][nm1 + nm2] = dict()
-                    res[nm1][nm1 + nm2]['name'] = nm1 + nm2
-
-                    labelImg[nm1 + nm2] = _img
-
-                    count+=1
-
-                    for idx3, s in enumerate(range(1, blur_sigmas + 1)):
-                        nm3 = ("_BLUR_" + str(s)).upper()
-                        _img = self.rotate(self.blur(x, sigma=s), y)
-
-                        if(np.count_nonzero(_img) == 0): continue
-
-                        res[nm1][nm1 + nm2 + nm3] = dict()
-                        res[nm1][nm1 + nm2 + nm3]['name'] = nm1 + nm2 + nm3
-
-                        labelImg[nm1 + nm2 + nm3] = _img
-                        count+=1
-
-
-        return res, labelImg, count
-
-    def cloud(self, img):
-        # Opening the primary image (used in background)
-        img1 = Image.fromarray(img)
-            
-        # Opening the secondary image (overlay image)
-        # folder 
-        
-        png_path = os.path.join(os.path.split(__file__)[0], 'cloud_template.png')
-        img2 = Image.open(png_path)
-
-        # resize the image
-        size = img1.size
-        img2 = img2.resize(size,Image.ANTIALIAS)
-
-        img1 = np.asarray(img1)
-        img2 = np.asarray(img2)
-
-        cloud_mask = img2[:,:,0]
-
-        res = np.where(cloud_mask == 0, img1, cloud_mask)
-
-        return res
-
-    def gdalDecreaseResolution(self, dataset, src, limiar=3, dst="/tmp/decrease.tif"):
-
-        xres, yres = operator.itemgetter(1,5)(dataset.GetGeoTransform())  
-
-        xres*=limiar
-        yres*=limiar
-
-        gdal.Warp(dst, src, xRes=xres, yRes=yres)
-
-        res = gdal.Open(dst)
-        res_b = res.GetRasterBand(1)
-        res_arr = res_b.ReadAsArray()
-
-        return res_arr
-
-methods_augmentate = Methods_Augmentate()
+from osgeo import gdal, ogr, osr
 
 class DataAugmentation:
     """QGIS Plugin Implementation."""
@@ -285,6 +131,9 @@ class DataAugmentation:
         self.imagesArray = []
 
         self.child = None
+
+        self.round = 0
+        self.roundPath = None
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -424,10 +273,43 @@ class DataAugmentation:
             self.dlg.vectorCombo.setCurrentText(nameVector)
 
             self.selectedNameVector = nameVector
+            
+            self.selected[nameVector] = dict()
+            self.selected[nameVector]['name'] = nameVector
+            self.selected[nameVector]['path'] = selectedVectorPath
+            self.selected[nameVector]['type'] = self.type['vector']
 
-            self.selected['name'] = nameVector
-            self.selected['path'] = selectedVectorPath
-            self.selected['type'] = self.type['vector']
+    def getGeometryType(self, src=None):
+        if not(src): return -1
+        d = ogr.Open(src)
+        l = d.GetLayer()
+        feature = l.GetNextFeature()
+        geometry = feature.GetGeometryRef()
+        return geometry.GetGeometryName()
+
+    def getProjectionVector(self, src=None):
+        if not(src): return -1
+        d = ogr.Open(src)
+        layer = d.GetLayer()
+        spatialRef = layer.GetSpatialRef()
+        return spatialRef.GetAttrValue('AUTHORITY', 1)
+    
+    def getProjectionLayer(self, src=None):
+        if not(src): return -1
+        d = gdal.Open(src)
+        proj = osr.SpatialReference(wkt=d.GetProjection())
+        return proj.GetAttrValue('AUTHORITY',1)
+
+    def reprojectionVector(self, src=None, dst=None, CRS=4326, layer=None):
+        # Help
+        # processing.algorithmHelp("native:assignprojection")
+        if(src == None or dst == None): return -1
+        p = dict()
+        p['INPUT'] = src
+        p['CRS'] = f"EPSG:{CRS}"
+        p['OUTPUT'] = dst
+        processing.run("native:assignprojection", p)
+        return p['OUTPUT']
 
     def readShape(self, src=None):
         if(src == None): src = self.selected[self.selectedNameVector]['path']
@@ -439,7 +321,7 @@ class DataAugmentation:
 
     def splitPoint(self, dst=None):
 
-        if(dst == None): dst = "/tmp/tmp_point.shp"
+        if(dst == None): dst = os.path.join(self.roundPath, "tmp_point.shp")
 
         shapefileRef, layerRef = self.readShape()
 
@@ -488,7 +370,6 @@ class DataAugmentation:
         self.band      = self.dataset.GetRasterBand(1)
         self.bandArr   = self.band.ReadAsArray()
 
-
         # Get properties to save later
         self.geoTransform = self.dataset.GetGeoTransform()
         self.projection = self.dataset.GetProjection()
@@ -528,40 +409,34 @@ class DataAugmentation:
 
         return dst
     
-    def getBufferPoint(self, src, dst=None, buffer=0.01):
-
+    def getBufferPoint(self, src, dst=None, buffer=0.0025):
+        if(dst == None): return -1
         # https://docs.qgis.org/3.16/en/docs/user_manual/processing/console.html
-        parameters = {'INPUT': '/data/lines.shp',
-               'DISTANCE': 0.1,
-               'SEGMENTS': 10,
+        parameters = {'INPUT': src,
+               'DISTANCE': buffer,
+               'SEGMENTS': 4,
                'DISSOLVE': True,
-               'END_CAP_STYLE': 0,
-               'JOIN_STYLE': 0,
-               'MITER_LIMIT': 10,
-               'OUTPUT': '/data/buffers.shp'}
-
-        parameters['INPUT'] = src
-        parameters['DISTANCE'] = buffer
-
-        if(dst == None): parameters['OUTPUT'] = "/tmp/buffer.shp"
-        else: parameters['OUTPUT'] = dst
-
+               'END_CAP_STYLE': 2,
+               'JOIN_STYLE': 1,
+               'MITER_LIMIT': 20,
+               'OUTPUT': dst}
         processing.run("native:buffer", parameters)
-
         return parameters['OUTPUT']
 
     def cropLayerByShape(self, src, shape, dst=None, dstNodata=0):
+        if(dst == None): return -1 
 
-        if(dst == None):
-            name = os.path.split(src)[-1]
-            dst = os.path.join("/tmp", "tmp_buffer_" + name)
-            
-        OutTile = gdal.Warp(dst,
-                            src, 
-                            cutlineDSName=shape,
-                            cropToCutline=True,
-                            dstNodata = dstNodata)
-        OutTile = None
+        try:
+            OutTile = gdal.Warp(dst,
+                                src,
+                                cutlineDSName=shape,
+                                cropToCutline=True,
+                                dstNodata = dstNodata)
+            OutTile = None
+        except Exception as err:
+            self.iface.messageBar().pushMessage("Error", f"Error cropLayerByShape {err}", level=Qgis.Critical)
+            return -1
+
         return dst
     
     def onChangeLayer(self, value):
@@ -573,8 +448,7 @@ class DataAugmentation:
 
             layer = [ layer for layer in self.layers if layer.name() == self.dlg.layerCombo.currentText() ]
 
-            if(len(layer) == 0): print("Info: not in Layers")
-            else:
+            if(len(layer) != 0):
                 layer = layer[0].layer()
     
                 self.selected[self.dlg.layerCombo.currentText()] = dict()
@@ -589,8 +463,7 @@ class DataAugmentation:
         else:
             vector = [ layer for layer in self.layers if layer.name() == self.dlg.vectorCombo.currentText() ]
 
-            if(len(vector) == 0): print("Info: not in Layers")
-            else:
+            if(len(vector) != 0):
                 vector = vector[0].layer()
     
                 self.selected[self.dlg.vectorCombo.currentText()] = dict()
@@ -600,16 +473,12 @@ class DataAugmentation:
                 self.selectedNameVector = self.dlg.vectorCombo.currentText()
 
     def chosenTreeItem(self, item, index):
-        
         _item = item.clone()
         itemName = _item.text(index)
 
         # if last child level
         if(len(_item.takeChildren()) == 0):
-
-            # create a tmp file and save image
-            dst = self.saveLayer(os.path.join("/tmp", itemName), self.methodItem[itemName])
-
+            dst = self.saveLayer(os.path.join(self.roundPath, itemName), self.methodItem[itemName])
             layer = QgsRasterLayer(dst, itemName)
             self.plotCanvas(layer)
 
@@ -631,7 +500,7 @@ class DataAugmentation:
 
                     _out = root + "_ROTATE90.tif" # Example: /tmp/tmp_point_0_BUFFER_LC08_L1TP_220068_20210101_CROP_CROP_ROTATE90.tif
                     _outName = os.path.splitext(os.path.split(_out)[1])[0] # Example: tmp_point_0_BUFFER_LC08_L1TP_220068_20210101_CROP_CROP_ROTATE90
-                    _img = methods_augmentate.rotate(dataset["bandArr"], 90)
+                    _img = rotate(dataset["bandArr"], 90)
 
                     # self.methods["rotate"]["rotate90"] = dict()
                     self.methods["rotate"]["rotate90"][_outName] = dict()
@@ -654,7 +523,7 @@ class DataAugmentation:
 
                     _out = root + "_ROTATE180.tif" 
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.rotate(dataset["bandArr"], 180)
+                    _img = rotate(dataset["bandArr"], 180)
 
                     # self.methods["rotate"]["rotate90"] = dict()
                     self.methods["rotate"]["rotate180"][_outName] = dict()
@@ -677,7 +546,7 @@ class DataAugmentation:
 
                     _out = root + "_FLIP_HOR.tif" 
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.flip(dataset["bandArr"], 'horizontal')
+                    _img = flip(dataset["bandArr"], 'horizontal')
 
                     # self.methods["rotate"]["rotate90"] = dict()
                     self.methods["flip"]["horizontal"][_outName] = dict()
@@ -700,7 +569,7 @@ class DataAugmentation:
                         
                     _out = root + "_FLIP_VER.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.flip(dataset["bandArr"], "vertical")
+                    _img = flip(dataset["bandArr"], "vertical")
 
                     self.methods["flip"]["vertical"][_outName] = dict()
                     self.methods["flip"]["vertical"][_outName]["image"] = _img
@@ -722,7 +591,7 @@ class DataAugmentation:
                         
                     _out = root + "_RESCALE.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.rescale(dataset["bandArr"], 0.5)
+                    _img = rescale(dataset["bandArr"], 0.5)
                     
                     self.methods["reshape"]["rescale"][_outName] = dict()
                     self.methods["reshape"]["rescale"][_outName]["image"] = _img
@@ -744,7 +613,7 @@ class DataAugmentation:
 
                     _out = root + "_CROP.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.crop(dataset["bandArr"], 100, 100, 200, 200)
+                    _img = crop(dataset["bandArr"], 100, 100, 200, 200)
 
                     self.methods["reshape"]["crop"][_outName] = dict()
                     self.methods["reshape"]["crop"][_outName]["image"] = _img
@@ -766,7 +635,7 @@ class DataAugmentation:
 
                     _out = root + "_TRUNC.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.trunc(dataset["bandArr"], 100, 200)
+                    _img = trunc(dataset["bandArr"], 100, 200)
 
                     self.methods["reshape"]["truncate"][_outName] = dict()
                     self.methods["reshape"]["truncate"][_outName]["image"] = _img
@@ -788,7 +657,7 @@ class DataAugmentation:
 
                     _out = root + "_TRIM.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.trim(dataset["bandArr"], 200, 200, 20, 20)
+                    _img = trim(dataset["bandArr"], 200, 200, 20, 20)
                     self.methods["reshape"]["trim"][_outName] = dict()
                     self.methods["reshape"]["trim"][_outName]["image"] = _img
                     self.methods["reshape"]["trim"][_outName]["name"]  = _outName
@@ -809,7 +678,7 @@ class DataAugmentation:
 
                     _out = root + "_BINARY.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.binary(dataset["bandArr"], bw=False, threshold=50, inv=True)
+                    _img = binary(dataset["bandArr"], bw=False, threshold=50, inv=True)
 
                     self.methods["color"]["binary"][_outName] = dict()
                     self.methods["color"]["binary"][_outName]["image"] = _img
@@ -831,7 +700,7 @@ class DataAugmentation:
 
                     _out = root + "_CLOUD.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.cloud(dataset["bandArr"])
+                    _img = cloud(dataset["bandArr"])
 
                     self.methods["remote_sensing"]["cloud"][_outName] = dict()
                     self.methods["remote_sensing"]["cloud"][_outName]["image"] = _img
@@ -853,7 +722,7 @@ class DataAugmentation:
                     
                     _out = root + "_DEGRADATION.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.gdalDecreaseResolution(dataset["dataset"], image)
+                    _img = gdalDecreaseResolution(dataset["dataset"], image, dst=_out)
 
                     self.methods["remote_sensing"]["degradation"][_outName] = dict()
                     self.methods["remote_sensing"]["degradation"][_outName]["image"] = _img
@@ -875,7 +744,7 @@ class DataAugmentation:
 
                     _out = root + "_BLUR.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.blur(dataset["bandArr"], sigma=2)
+                    _img = blur(dataset["bandArr"], sigma=2)
 
                     self.methods["remote_sensing"]["haze"][_outName] = dict()
                     self.methods["remote_sensing"]["haze"][_outName]["image"] = _img
@@ -897,7 +766,7 @@ class DataAugmentation:
 
                     _out = root + "_SHARPENEDGES.tif"
                     _outName = os.path.splitext(os.path.split(_out)[1])[0]
-                    _img = methods_augmentate.edgy(dataset["bandArr"])
+                    _img = edgy(dataset["bandArr"])
 
                     self.methods["remote_sensing"]["sharpen_edges"][_outName] = dict()
                     self.methods["remote_sensing"]["sharpen_edges"][_outName]["image"] = _img
@@ -917,7 +786,7 @@ class DataAugmentation:
                     root, ext = os.path.splitext(image)
                     _outName = os.path.splitext(os.path.split(image)[1])[0]
 
-                    images, labelImage, q = methods_augmentate.augmentate(dataset["bandArr"], name=_outName, chunks=50)
+                    images, labelImage, q = augmentate(dataset["bandArr"], name=_outName, chunks=50)
 
                     # Merge to dict used to save tmp file {key: image array}
                     self.methodItem.update(labelImage)
@@ -963,38 +832,28 @@ class DataAugmentation:
         self.imagesArray = []
         self.vectorsBufferPath = []
 
-        # self.dlg.canvas.scene().clear()
-
         # Get selected layer and vector index
         self.selectedLayerIndex  = self.dlg.layerCombo.currentIndex()
         self.selectedVectorIndex = self.dlg.vectorCombo.currentIndex()
 
-        # Get output path, por padrao /tmp
-        self.outputDir  = "/tmp" #self.selectedLayerPath if self.selectedLayerPath != None else "/tmp"
-
-        # Required fields
-
         # Required Layer
         if(self.selectedLayerIndex == -1):
             self.iface.messageBar().pushMessage("Error", "Required select layer", level=Qgis.Critical)
-            return
+            return -1
 
         # Required Vector
         elif(self.selectedVectorIndex == -1):
             
             # If not vector do with all image if is not too big
             self.iface.messageBar().pushMessage("Error", "Vector not provided, trying with the whole image", level=Qgis.Info, duration=3)
-
+            return -1
             # self.iface.messageBar().pushMessage("Error", "Required select vector", level=Qgis.Critical)
             # return
 
         # Get selected layer and vector
-
         # If not chosen file from button
-        if(len(self.layers) == 0): print("Info: layer empty")
-        else:
+        if(len(self.layers) != 0):
             if(self.selectedName == None):
-
                 # Must be on layers
                 layer = [ layer for layer in self.layers if layer.name() == self.dlg.layerCombo.currentText() ][0].layer()
 
@@ -1003,11 +862,8 @@ class DataAugmentation:
                 self.selected[self.dlg.layerCombo.currentText()]['type'] = self.type['layer']
 
                 self.selectedName = self.dlg.layerCombo.currentText()
-
-
             if(self.selectedNameVector == None):
                 vector = [ layer for layer in self.layers if layer.name() == self.dlg.vectorCombo.currentText() ]
-                
                 if(len(vector) > 0):
                     vector = vector[0].layer()
 
@@ -1016,40 +872,75 @@ class DataAugmentation:
                     self.selected[self.dlg.vectorCombo.currentText()]['type'] = self.type['vector']
                     
                     self.selectedNameVector = self.dlg.vectorCombo.currentText()
-
-
-        # print(self.selectedName)
-        # print(self.selectedNameVector)
-        # print(self.selected[self.selectedNameVector]['path'])
+        
+        # check round (folders)
+        if not(os.path.isdir(os.path.join(self.tmpFolder, str(self.round)))):
+            self.roundPath = os.path.join(self.tmpFolder, str(self.round))
+            os.mkdir(self.roundPath)
+            self.round += 1
 
         # Clip by vector
         if(self.selectedNameVector and self.selectedName):
+            
+            # validade points
+            try:
+                # Check projection and feature type
+                projectionVector = self.getProjectionVector(self.selected[self.selectedNameVector]['path'])
 
-            self.splitPoint() # feed self.vectorsPath array
-            print(self.vectorsPath)
+                # check path
+                # _aux = self.selected[self.selectedNameVector]['path']
+                # if(os.path.split(_aux)[0] == ""):
+                #     self.iface.messageBar().pushMessage("Error", "Vector path is not defined", level=Qgis.Critical)    
+
+                if(projectionVector != "4326"):
+                    self.iface.messageBar().pushMessage("Error", "Vector must be in EPSG:4326", level=Qgis.Critical)
+                    return 
+
+                # Check geometry type
+                geometryType = self.getGeometryType(self.selected[self.selectedNameVector]['path'])
+                if(geometryType != "POINT"):
+                    self.iface.messageBar().pushMessage("Error", f"Geometry type must be a POINT not {geometryType}", level=Qgis.Critical)
+                    return 
+
+            except Exception as err:
+                self.iface.messageBar().pushMessage("Error", f"Error validating vector: {err}", level=Qgis.Critical)
+                return 
+
+            dst = self.selected[self.selectedNameVector]['path']
+            dst = os.path.split(dst)[-1]
+            dst = os.path.join(self.roundPath, dst)
+            
+            # Save each layer separated
+            self.splitPoint(dst=dst) # feed self.vectorsPath array
 
             # Save Buffer array 
             for vector in self.vectorsPath:
                 dst = vector.replace(".shp", "_BUFFER.shp")
+                dst = os.path.split(dst)[-1]
+                dst = os.path.join(self.roundPath, dst)
                 buffer = self.getBufferPoint(vector, dst)
                 self.vectorsBufferPath.append(buffer)
 
             # Clip image by buffer vectors array
             for buffer in self.vectorsBufferPath:
                 dst = buffer.replace(".shp", "_" + self.selectedName + "_CROP.tif")
+                dst = os.path.split(dst)[-1]
+                dst = os.path.join(self.roundPath, dst)
                 image = self.cropLayerByShape(self.selected[self.selectedName]['path'], buffer, dst)
                 self.imagesArray.append(image)
         
-
-        # print(self.vectorsBufferPath)
-        print(self.imagesArray)
-
+        # validating arrays
+        for i in self.imagesArray:
+            if not(os.path.isfile(i)):
+                self.iface.messageBar().pushMessage("Error", "Error saving image", level=Qgis.Critical)
+                return -1
+            
         # Get array and info from selected layer
         # responseRL = self.readLayer()
         responseRL = "ok"
         if(responseRL == "err"): 
             self.iface.messageBar().pushMessage("Error", "Image too large, please provide de vector file", level=Qgis.Critical)
-            return
+            return -1
         else:
             # check chosen methods
             self.options(imagesArr=self.imagesArray)
@@ -1067,14 +958,23 @@ class DataAugmentation:
         # Only create GUI ONCE in callback, so that it will only load when the plugin is started
         if self.first_start == True:
 
-            # clear /tmp 
-            for ext in ("*.tif", "*.dbf", "*.shp", "*.prj", "*.shx", "*.xml"):
-                for f in glob.glob("/tmp/" + ext):
-                    os.remove(f)
+            # Creating and cleaning folder
+            if(platform.startswith("win")): self.tmpFolder = "C:\\tmp_augmentation"
+            else:                           self.tmpFolder = "/tmp"
+            
+            if (os.path.isdir(self.tmpFolder)): 
+                for f in [os.path.join(self.tmpFolder, x) for x in os.listdir(self.tmpFolder)]:
+                    try:
+                        # remove dirs
+                        if(os.path.isdir(f)):  shutil.rmtree(f)
+                        # remove files
+                        if(os.path.isfile(f)): os.remove(f)
 
+                    except Exception as e: print(e)
+            else: os.mkdir(self.tmpFolder)
+            
             self.first_start = False
             self.dlg = DataAugmentationDialog()
-
 
             # On click button select output file
             self.dlg.layerButton.clicked.connect(self.selectLayerFile)
@@ -1103,7 +1003,7 @@ class DataAugmentation:
 
         # Populate the layerCombo with names of all the loaded layers
         # Check if there is layers
-        if not(len(self.layers) == 0): 
+        if (len(self.layers) != 0): 
             self.dlg.layerCombo.addItems([layer.name() for layer in self.layers if not(os.path.splitext(layer.layer().dataProvider().dataSourceUri().lower())[1] in self.sf) ])
             self.dlg.vectorCombo.addItems([layer.name() for layer in self.layers if(os.path.splitext(layer.layer().dataProvider().dataSourceUri().lower())[1] in self.sf) ])
 
@@ -1115,3 +1015,5 @@ class DataAugmentation:
         
         if result:
             pass
+
+# criar as subpastas
